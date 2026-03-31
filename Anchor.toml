@@ -1,0 +1,18 @@
+[package]
+name = "rialo_dex"
+version = "0.1.0"
+description = "Rialo DEX - Solana Devnet DEX with RIAL token, Faucet, Swap, and Bridge"
+edition = "2021"
+
+[provider]
+cluster = "devnet"
+wallet = "~/.config/solana/id.json"
+
+[programs.devnet]
+rialo_dex = "Dar4UMBPocisoyaJ9DfxKKNjwkVoDDXf9LvTNnVBZx1X"
+
+[registry]
+url = "https://api.github.com/repos/coral-xyz/anchor/releases/download/v0.29.0/anchor-cli-solana.so"
+
+[settings]
+skip-lint = false
