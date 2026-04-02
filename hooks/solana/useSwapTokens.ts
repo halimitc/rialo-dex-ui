@@ -69,7 +69,28 @@ export function useSwapTokens(walletAddress: string | null): SwapResult {
         const slippageBps = Math.floor(slippage * 100)
         
         let quote: any
-        const fallbackOutAmount = Math.floor(parseFloat(inputAmount) * 0.99 * Math.pow(10, outputDecimals)).toString()
+        const MOCK_PRICES: Record<string, number> = {
+          'So11111111111111111111111111111111111111112': 145, // SOL
+          'native': 145,
+          default: 1 // RIAL, USDC, USDT
+        }
+        
+        // Match token to mock price (if it's not SOL, assume it's RIAL/USDC worth around $0.5 - $1)
+        // From swap-panel UI, RIAL is $0.5
+        const RIAL_MINT = 'EczP6Zf8q6QJ6VjT5E5FjZ5tq5dK2CjR2CjR2CjR2CjR'; // We'll just use a generic check
+        const getMockPrice = (mint: string) => {
+           if (mint === 'So11111111111111111111111111111111111111112' || mint === 'native') return 145;
+           // Default to 0.5 for RIAL to match UI's behavior safely without needing direct env import
+           return 0.5;
+        }
+
+        const fromPrice = getMockPrice(safeInputMint)
+        const toPrice = getMockPrice(safeOutputMint)
+
+        // Calculate output amount using UI mock prices (incorporating slippage buffer)
+        const exchangeRate = fromPrice / toPrice;
+        const fallbackOutAmountFloat = parseFloat(inputAmount) * exchangeRate * 0.99;
+        const fallbackOutAmount = Math.floor(fallbackOutAmountFloat * Math.pow(10, outputDecimals)).toString()
 
         try {
           quote = await getQuote(safeInputMint, safeOutputMint, rawAmount, slippageBps)
@@ -78,7 +99,7 @@ export function useSwapTokens(walletAddress: string | null): SwapResult {
         } catch (e) {
           console.log("[Swap] Jupiter Quote failed (Normal on Devnet), using local mock calculation.");
           setPriceImpact(0.1)
-          setOutputAmount(rawAmount === "0" ? "0" : (parseFloat(inputAmount) * 0.99).toString())
+          setOutputAmount(rawAmount === "0" ? "0" : fallbackOutAmountFloat.toString())
           quote = null
         }
 

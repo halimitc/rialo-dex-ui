@@ -1,3 +1,5 @@
+import { Connection, PublicKey, TransactionInstruction, SystemProgram } from '@solana/web3.js';
+import { getAssociatedTokenAddress } from '@solana/spl-token';
 import {
   DEX_PROGRAM_ID,
   RIAL_MINT_STR,
@@ -44,13 +46,13 @@ export async function createRequestFaucetInstruction(
   
   // Get user's RIAL token account (create if doesn't exist)
   const userRialAccount = await getAssociatedTokenAddress(
-    TOKEN_MINTS.RIAL!,
+    new PublicKey(TOKEN_MINTS.RIAL!),
     userPublicKey
   );
 
   // Get faucet vault (created during DEX initialization)
   const faucetVault = await getAssociatedTokenAddress(
-    TOKEN_MINTS.RIAL!,
+    new PublicKey(TOKEN_MINTS.RIAL!),
     dexConfig.pda,
     true
   );

@@ -1,3 +1,6 @@
+import { Connection, PublicKey } from '@solana/web3.js';
+import { getAssociatedTokenAddress, getAccount, getMint } from '@solana/spl-token';
+
 /**
  * Get token balance for a user
  */
@@ -7,7 +10,6 @@ export async function getTokenBalance(
   userPublicKey: any
 ): Promise<bigint> {
   try {
-    const { getAssociatedTokenAddress, getAccount } = await import('@solana/spl-token');
     const tokenAccount = await getAssociatedTokenAddress(tokenMint, userPublicKey);
     const account = await getAccount(connection, tokenAccount);
     return account.amount;
@@ -96,13 +98,14 @@ export async function getTokenAccountInfo(
   try {
     const tokenAccount = await getAssociatedTokenAddress(tokenMint, userPublicKey);
     const account = await getAccount(connection, tokenAccount);
+    const mintInfo = await getMint(connection, account.mint);
 
     return {
       address: tokenAccount,
       mint: account.mint,
       owner: account.owner,
       amount: account.amount,
-      decimals: account.decimals,
+      decimals: mintInfo.decimals,
       isNative: account.isNative,
       isFrozen: account.isFrozen,
     };

@@ -10,8 +10,14 @@ export function LandingFooter() {
             <Link href="/" className="flex items-center gap-2">
               <div>
                 <img
-                  src="http://localhost:3000/logo.png"
+                  src="https://dex.rialo.my.id/logo.png?v=2"
+                  onError={(e) => {
+                    e.currentTarget.onerror = null;
+                    e.currentTarget.src = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%236366f1'><path d='M12 2L2 22h20L12 2z'/></svg>";
+                  }}
                   alt="Rialo Logo"
+                  fetchPriority="high"
+                  loading="eager"
                   className="w-8 h-8 object-contain"
                 />
               </div>

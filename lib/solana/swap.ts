@@ -1,17 +1,27 @@
-import { DEX_PROGRAM_ID_STR, SEEDS, POOL_CONFIG } from './config';
+import { Connection, PublicKey, TransactionInstruction } from '@solana/web3.js';
+import { getAssociatedTokenAddress, TOKEN_PROGRAM_ID } from '@solana/spl-token';
+import { DEX_PROGRAM_ID_STR, SEEDS, POOL_CONFIG, DEX_PROGRAM_ID_STR as DEX_PROGRAM_ID } from './config';
 
 /**
  * Get liquidity pool PDA
  */
-export async function getPoolPDA(mintA: any, mintB: any) {
+export async function getPoolPDA(tokenA: any, tokenB: any) {
   const { PublicKey } = await import('@solana/web3.js');
   const DEX_PROG = new PublicKey(DEX_PROGRAM_ID_STR);
+  
+  // Sort mints deterministically as done on-chain
+  let mintA = tokenA;
+  let mintB = tokenB;
+  if (mintA.toBuffer().compare(mintB.toBuffer()) > 0) {
+    mintA = tokenB;
+    mintB = tokenA;
+  }
   
   const [pda, bump] = await PublicKey.findProgramAddress(
     [SEEDS.POOL, mintA.toBuffer(), mintB.toBuffer()],
     DEX_PROG
   );
-  return { pda, bump };
+  return { pda, bump, mintA, mintB };
 }
 
 /**
@@ -106,7 +116,7 @@ export async function createSwapInstruction(
   instructionData.writeBigInt64LE(minOutputAmount, 9);
 
   const instruction = new TransactionInstruction({
-    programId: DEX_PROGRAM_ID,
+    programId: new PublicKey(DEX_PROGRAM_ID),
     keys: [
       { pubkey: pool.pda, isSigner: false, isWritable: true },
       { pubkey: vaultA, isSigner: false, isWritable: true },
@@ -168,8 +178,23 @@ export async function executeSwapTransaction(
     throw new Error('Pool not found or has no liquidity');
   }
 
+  // Sort mints to map reserves properly
+  const isTokenInMintA = tokenInMint.toBuffer().compare(pool.mintA.toBuffer()) === 0;
+  
+  const reserveIn = isTokenInMintA ? poolState.reserveA : poolState.reserveB;
+  const reserveOut = isTokenInMintA ? poolState.reserveB : poolState.reserveA;
+
+  if (inputAmount > (reserveIn / BigInt(2))) {
+    throw new Error('Swap amount exceeds maximum allowed (50% of vault liquidity)! Suggestion: Try a smaller amount.');
+  }
+
   // Calculate swap output
-  const outputAmount = calculateSwapOutput(inputAmount, poolState.reserveA, poolState.reserveB);
+  const outputAmount = calculateSwapOutput(inputAmount, reserveIn, reserveOut);
+  
+  if (outputAmount > reserveOut) {
+    throw new Error('Required output exceeds available vault liquidity! Suggestion: Try a smaller amount.');
+  }
+
   const minOutputAmount = calculateMinOutputWithSlippage(outputAmount, slippageBps);
 
   // Create swap instruction

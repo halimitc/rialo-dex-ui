@@ -16,12 +16,12 @@ interface FaucetResponse {
 }
 
 export function FaucetCard() {
-  const { address, isConnected, chainId, connect } = useWeb3()
+  const { address, isConnected, network, connect } = useWeb3()
   const [status, setStatus] = useState<FaucetStatus>("idle")
   const [txHash, setTxHash] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
-  const isCorrectNetwork = chainId === 11155111
+  const isCorrectNetwork = network === "devnet" || network === "testnet"
 
   const requestFaucet = async () => {
     if (!address) return

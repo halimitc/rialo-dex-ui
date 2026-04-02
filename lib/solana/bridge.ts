@@ -1,4 +1,6 @@
-import { DEX_PROGRAM_ID_STR, SEEDS, BRIDGE_CHAINS } from './config';
+import { Connection, PublicKey, TransactionInstruction, SystemProgram } from '@solana/web3.js';
+import { getAssociatedTokenAddress, TOKEN_PROGRAM_ID } from '@solana/spl-token';
+import { DEX_PROGRAM_ID_STR, SEEDS, BRIDGE_CHAINS, DEX_PROGRAM_ID_STR as DEX_PROGRAM_ID } from './config';
 
 export type DestChain = typeof BRIDGE_CHAINS[keyof typeof BRIDGE_CHAINS];
 
@@ -17,7 +19,7 @@ export async function getBridgeTxPDA(
 
   const [pda, bump] = await PublicKey.findProgramAddress(
     [SEEDS.BRIDGE_TX, userPublicKey.toBuffer(), nonceBuffer],
-    DEX_PROGRAM_ID
+    new PublicKey(DEX_PROGRAM_ID)
   );
   return { pda, bump };
 }
@@ -26,9 +28,10 @@ export async function getBridgeTxPDA(
  * Get DEX config PDA
  */
 export async function getDexConfigPDA() {
+  const { PublicKey } = await import('@solana/web3.js');
   const [pda, bump] = await PublicKey.findProgramAddress(
     [SEEDS.DEX_CONFIG],
-    DEX_PROGRAM_ID
+    new PublicKey(DEX_PROGRAM_ID)
   );
   return { pda, bump };
 }
@@ -58,7 +61,7 @@ export async function createInitiateBridgeInstruction(
   instructionData.writeBigInt64LE(nonce, 10);
 
   const instruction = new TransactionInstruction({
-    programId: DEX_PROGRAM_ID,
+    programId: new PublicKey(DEX_PROGRAM_ID),
     keys: [
       { pubkey: dexConfig.pda, isSigner: false, isWritable: false },
       { pubkey: bridgeTx.pda, isSigner: false, isWritable: true },
@@ -87,10 +90,10 @@ export async function createCompleteBridgeInstruction(
   instructionData.writeUInt8(4, 0); // Instruction discriminator for complete_bridge
 
   const instruction = new TransactionInstruction({
-    programId: DEX_PROGRAM_ID,
+    programId: new PublicKey(DEX_PROGRAM_ID),
     keys: [
       { pubkey: bridgeTx.pda, isSigner: false, isWritable: true },
-      { pubkey: DEX_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: new PublicKey(DEX_PROGRAM_ID), isSigner: false, isWritable: false },
     ],
     data: instructionData,
   });
@@ -138,10 +141,10 @@ export async function getBridgeStatus(
  */
 export function getChainName(chainId: number): string {
   switch (chainId) {
-    case BRIDGE_CHAINS.SOLANA_DEVNET:
+    case BRIDGE_CHAINS.SOLANA_Devnet:
       return 'Solana Devnet';
-    case BRIDGE_CHAINS.ETHEREUM_GOERLI:
-      return 'Ethereum Goerli';
+    case BRIDGE_CHAINS.ETHEREUM_Devnet:
+      return 'Ethereum Devnet';
     case BRIDGE_CHAINS.POLYGON_MUMBAI:
       return 'Polygon Mumbai';
     default:
@@ -178,5 +181,5 @@ export function generateNonce(): bigint {
  * Validate destination chain
  */
 export function isValidBridgeChain(chain: DestChain): boolean {
-  return chain === BRIDGE_CHAINS.ETHEREUM_GOERLI || chain === BRIDGE_CHAINS.POLYGON_MUMBAI;
+  return chain === BRIDGE_CHAINS.ETHEREUM_Devnet || chain === BRIDGE_CHAINS.POLYGON_MUMBAI;
 }

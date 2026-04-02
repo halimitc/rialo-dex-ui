@@ -10,12 +10,17 @@ import {
 import {
   getAssociatedTokenAddressSync,
   createAssociatedTokenAccountInstruction,
-  createTransferInstruction,
+  TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
 import { getTreasuryKeypair } from "@/lib/solana/treasury";
 import { Devnet_RPC } from "@/lib/solana/config";
+import { Program, AnchorProvider, BN } from "@coral-xyz/anchor";
+
+// IDL for the AMM
+import IDL_RAW from "../../../lib/solana/idl/rialo_amm_dex.json";
 
 const NATIVE_MINT = "So11111111111111111111111111111111111111112";
+const PROGRAM_ID = new PublicKey("EPLjdrFaEJ51yUzbwdaroeQqp6FX2egmAhNN4avD8B9u");
 
 export async function POST(req: NextRequest) {
   try {
@@ -35,146 +40,122 @@ export async function POST(req: NextRequest) {
     const safeWalletAddress = walletAddress.replace(/[^1-9A-HJ-NP-Za-km-z]/g, '');
     const userPubkey = new PublicKey(safeWalletAddress);
 
+    const safeInputMintRaw = inputMint.replace(/[^1-9A-HJ-NP-Za-km-z]/g, '');
+    const safeOutputMintRaw = outputMint.replace(/[^1-9A-HJ-NP-Za-km-z]/g, '');
+
+    const safeInputMint = safeInputMintRaw === "native" ? NATIVE_MINT : safeInputMintRaw;
+    const safeOutputMint = safeOutputMintRaw === "native" ? NATIVE_MINT : safeOutputMintRaw;
+
+    const mintPubkeyIn = new PublicKey(safeInputMint);
+    const mintPubkeyOut = new PublicKey(safeOutputMint);
+
+    // Sort mints to find Pool PDA correctly
+    let mintA = mintPubkeyIn;
+    let mintB = mintPubkeyOut;
+    let isAToB = true;
+
+    if (mintA.toBuffer().compare(mintB.toBuffer()) > 0) {
+        mintA = mintPubkeyOut;
+        mintB = mintPubkeyIn;
+        isAToB = false;
+    }
+
+    const [poolPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("pool"), mintA.toBuffer(), mintB.toBuffer()],
+        PROGRAM_ID
+    );
+
+    const [authorityPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("authority"), poolPda.toBuffer()],
+        PROGRAM_ID
+    );
+
+    const userSource = getAssociatedTokenAddressSync(mintPubkeyIn, userPubkey, true);
+    const userDestination = getAssociatedTokenAddressSync(mintPubkeyOut, userPubkey, true);
+
+    // Setup Anchor
+    const dummyWallet = {
+      publicKey: treasury.publicKey,
+      signTransaction: async (tx: any) => tx,
+      signAllTransactions: async (txs: any[]) => txs,
+    };
+    const provider = new AnchorProvider(connection, dummyWallet as any, { preflightCommitment: "confirmed" });
+    const program = new Program(IDL_RAW as any, PROGRAM_ID, provider);
+
+    // Fetch Pool State to get Vaults
+    let poolState: any;
+    try {
+        poolState = await program.account.pool.fetch(poolPda);
+    } catch (e) {
+        return NextResponse.json({ success: false, message: "Liquidity pool is not initialized for this pair on Devnet." }, { status: 400 });
+    }
+
     const transaction = new Transaction();
-    const inAmountBN = BigInt(Math.floor(Number(inputAmount)));
-    const outAmountBN = BigInt(Math.floor(Number(outputAmount)));
 
-    // Safely clean strings from UTF/BOM
-    const safeInputMint = inputMint.replace(/[^1-9A-HJ-NP-Za-km-z]/g, '');
-    const safeOutputMint = outputMint.replace(/[^1-9A-HJ-NP-Za-km-z]/g, '');
-
-    const isInputNative = safeInputMint === NATIVE_MINT || safeInputMint === "native";
-    const isOutputNative = safeOutputMint === NATIVE_MINT || safeOutputMint === "native";
-
-    // --- STEP 1: Handle Input (User -> Treasury) ---
-    if (isInputNative) {
-      // Transfer SOL from User to Treasury
+    // Make sure user ATAs exist
+    const userDestAtaInfo = await connection.getAccountInfo(userDestination);
+    if (!userDestAtaInfo) {
       transaction.add(
-        SystemProgram.transfer({
-          fromPubkey: userPubkey,
-          toPubkey: treasury.publicKey,
-          lamports: inAmountBN,
-        })
-      );
-    } else {
-      // Transfer SPL Token from User to Treasury
-      const mintPubkey = new PublicKey(safeInputMint);
-      const userAta = getAssociatedTokenAddressSync(mintPubkey, userPubkey, true);
-      const treasuryAta = getAssociatedTokenAddressSync(mintPubkey, treasury.publicKey, true);
-
-      // Check if Treasury ATA exists, if not, create it
-      const treasuryAtaInfo = await connection.getAccountInfo(treasuryAta);
-      if (!treasuryAtaInfo) {
-        transaction.add(
-          createAssociatedTokenAccountInstruction(
-            userPubkey, // Payer (User pays for tx and ATA creation)
-            treasuryAta,
-            treasury.publicKey,
-            mintPubkey
-          )
-        );
-      }
-
-      transaction.add(
-        createTransferInstruction(
-          userAta, // source
-          treasuryAta, // destination
-          userPubkey, // owner
-          inAmountBN
+        createAssociatedTokenAccountInstruction(
+          userPubkey, 
+          userDestination,
+          userPubkey,
+          mintPubkeyOut
         )
       );
     }
+    
+    // Convert amounts to BN (bn.js)
+    let BN_CLASS = BN;
 
-    // --- STEP 2: Handle Output (Treasury -> User) ---
-    if (isOutputNative) {
-      // Check Treasury Native SOL Balance
-      const treasuryBalance = await connection.getBalance(treasury.publicKey);
-      console.log(`[Swap API] Treasury SOL Balance: ${treasuryBalance}, Required: ${outAmountBN}`);
-      
-      if (BigInt(treasuryBalance) < outAmountBN) {
-        return NextResponse.json({ 
-          success: false, 
-          message: `Insufficient Treasury balance. The DEX Treasury does not have enough SOL on Devnet to fulfill this swap.` 
-        }, { status: 400 });
-      }
+    const amountInBN = new BN_CLASS(inputAmount);
+    // Slippage tolerance: frontend requested exact quote, AMM supports minimumAmountOut
+    const minAmountOutBN = new BN_CLASS(Math.floor(Number(outputAmount) * 0.99));
 
-      // Transfer SOL from Treasury to User
-      transaction.add(
-        SystemProgram.transfer({
-          fromPubkey: treasury.publicKey,
-          toPubkey: userPubkey,
-          lamports: outAmountBN,
-        })
-      );
-    } else {
-      // Transfer SPL Token from Treasury to User
-      const mintPubkey = new PublicKey(safeOutputMint);
-      const treasuryAta = getAssociatedTokenAddressSync(mintPubkey, treasury.publicKey, true);
-      const userAta = getAssociatedTokenAddressSync(mintPubkey, userPubkey, true);
+    // Handle wrapping SOL -> wSOL if input is native
+    if (safeInputMint === NATIVE_MINT || safeInputMint === "native") {
+        const { createSyncNativeInstruction } = require("@solana/spl-token");
+        const wsolAtaInfo = await connection.getAccountInfo(userSource);
+        if (!wsolAtaInfo) {
+            transaction.add(createAssociatedTokenAccountInstruction(userPubkey, userSource, userPubkey, mintPubkeyIn));
+        }
+        transaction.add(SystemProgram.transfer({
+            fromPubkey: userPubkey,
+            toPubkey: userSource,
+            lamports: amountInBN.toNumber()
+        }));
+        transaction.add(createSyncNativeInstruction(userSource));
+    }
 
-      console.log(`[Swap API] Mint: ${safeOutputMint}`);
-      console.log(`[Swap API] Treasury: ${treasury.publicKey.toBase58()}`);
-      console.log(`[Swap API] Treasury ATA: ${treasuryAta.toBase58()}`);
+    // Construct the Swap instruction
+    const swapIx = await program.methods.swap(
+      amountInBN,
+      minAmountOutBN,
+      isAToB
+    )
+    .accounts({
+      pool: poolPda,
+      authority: authorityPda,
+      vaultA: poolState.vaultA,
+      vaultB: poolState.vaultB,
+      userSource: userSource,
+      userDestination: userDestination,
+      user: userPubkey,
+      tokenProgram: TOKEN_PROGRAM_ID,
+    })
+    .instruction();
 
-      // Explicitly check Treasury SPL Token Balance
-      let treasuryBalanceAmount = 0n;
-      try {
-        const treasuryAtaBalance = await connection.getTokenAccountBalance(treasuryAta);
-        treasuryBalanceAmount = BigInt(treasuryAtaBalance.value.amount);
-      } catch (e: any) {
-        // ATA missing implies 0 balance. We will create it below if needed, but it still means 0 balance currently.
-        treasuryBalanceAmount = 0n;
-      }
-      
-      console.log(`[Swap API] Treasury Balance: ${treasuryBalanceAmount.toString()} tokens, Required: ${outAmountBN}`);
+    transaction.add(swapIx);
 
-      if (treasuryBalanceAmount < outAmountBN) {
-        return NextResponse.json({ 
-          success: false, 
-          message: `DEX Treasury liquidity empty. Treasury holds ${treasuryBalanceAmount} tokens but ${outAmountBN} is needed.` 
-        }, { status: 400 });
-      }
-
-      // If Treasury ATA does not exist (but somehow required amount is 0), we create it
-      const treasuryAtaInfo = await connection.getAccountInfo(treasuryAta);
-      if (!treasuryAtaInfo) {
-        transaction.add(
-          createAssociatedTokenAccountInstruction(
-            userPubkey, // User pays for ATA creation
-            treasuryAta,
-            treasury.publicKey,
-            mintPubkey
-          )
-        );
-      }
-
-      // Check if User ATA exists, if not, create it
-      const userAtaInfo = await connection.getAccountInfo(userAta);
-      if (!userAtaInfo) {
-        transaction.add(
-          createAssociatedTokenAccountInstruction(
-            userPubkey, 
-            userAta,
-            userPubkey,
-            mintPubkey
-          )
-        );
-      }
-
-      transaction.add(
-        createTransferInstruction(
-          treasuryAta, // source
-          userAta, // destination
-          treasury.publicKey, // owner is treasury
-          outAmountBN
-        )
-      );
+    // Handle unwrapping wSOL -> SOL if output is native
+    if (safeOutputMint === NATIVE_MINT || safeOutputMint === "native") {
+        const { createCloseAccountInstruction } = require("@solana/spl-token");
+        transaction.add(createCloseAccountInstruction(userDestination, userPubkey, userPubkey, []));
     }
 
     // Fetch latest blockhash
     const { blockhash } = await connection.getLatestBlockhash("confirmed");
 
-    // Convert legacy Transaction to VersionedTransaction
     const messageV0 = new TransactionMessage({
       payerKey: userPubkey,
       recentBlockhash: blockhash,
@@ -183,10 +164,7 @@ export async function POST(req: NextRequest) {
 
     const versionedTx = new VersionedTransaction(messageV0);
 
-    // Treasury partially signs the transaction (for Step 2 and potential Step 1 ATA logic)
-    versionedTx.sign([treasury]);
-
-    // Serialize to base64
+    // Send base64 back for user signing
     const serializedTx = versionedTx.serialize();
     const base64Tx = Buffer.from(serializedTx).toString("base64");
 

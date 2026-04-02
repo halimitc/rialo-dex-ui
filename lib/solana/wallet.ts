@@ -1,3 +1,5 @@
+import { PublicKey, Transaction } from '@solana/web3.js';
+
 /**
  * Get Phantom wallet provider
  */

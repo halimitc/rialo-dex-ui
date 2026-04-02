@@ -19,7 +19,7 @@ const DEFAULT_USDC_MINT = '4zMMC9srt5Ri5X14Gye5QZ5yi9GeZymQuNCjaSstB5Ty'; // USD
 const DEFAULT_USDT_MINT = 'Ejmc1UB4EsES5oAaRN63Spoxs81exHQVr1b6M7tEbvW'; // Dummy placeholder
 
 // Export as strings - convert to PublicKey in hooks/components where needed
-export const DEX_PROGRAM_ID_STR = (process.env.NEXT_PUBLIC_DEX_PROGRAM_ID || TOKEN_PROGRAM).trim();
+export const DEX_PROGRAM_ID_STR = (process.env.NEXT_PUBLIC_DEX_PROGRAM_ID || 'EPLjdrFaEJ51yUzbwdaroeQqp6FX2egmAhNN4avD8B9u').trim();
 export const RIAL_MINT_STR = (process.env.NEXT_PUBLIC_RIAL_MINT || DEFAULT_USDC_MINT).trim();
 export const USDC_MINT_STR = (process.env.NEXT_PUBLIC_USDC_MINT || DEFAULT_USDC_MINT).trim();
 export const USDT_MINT_STR = (process.env.NEXT_PUBLIC_USDT_MINT || DEFAULT_USDT_MINT).trim();

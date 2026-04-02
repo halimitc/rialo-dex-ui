@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useState } from 'react'
-import { TESTNET_RPC } from '@/lib/solana/config'
+import { DEVNET_RPC } from '@/lib/solana/config'
 
 export interface SolanaState {
   connection: any | null
@@ -22,7 +22,7 @@ export function useSolana() {
   const initConnection = useCallback(async () => {
     try {
       const { Connection } = await import('@solana/web3.js')
-      const connection = new Connection(TESTNET_RPC, 'confirmed')
+      const connection = new Connection(DEVNET_RPC, 'confirmed')
       setState((prev) => ({ ...prev, connection }))
       return connection
     } catch (err) {
